@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+      - ./certbot/www:/var/www/certbot:ro
+    depends_on:
+      - web
+      - dashboard
+    restart: always
+
+  web:
+    build: ./web
+    command: gunicorn --bind 0.0.0.0:5002 app:app
+    expose:
+      - "5002"
+    environment:
+      - FLASK_APP=app.py
+      - FLASK_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=postgresql://user:password@db:5432/mydatabase
+    depends_on:
+      - redis
+      - db
+    restart: always
+
+  dashboard:
+    build: ./dashboard
+    command: uvicorn main:app --host 0.0.0.0 --port 5004
+    expose:
+      - "5004"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DATABASE_URL=postgresql://user:password@db:5432/mydatabase
+    depends_on:
+      - redis
+      - db
+    restart: always
+
+  executor:
+    build: ./executor
+    command: celery -A celery_worker.celery worker --loglevel=info
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: always
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    restart: always
+
+  db:
+    image: postgres:14
+    environment:
+      POSTGRES_DB: mydatabase
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: always
+
+  certbot:
+    image: certbot/certbot
+    volumes:
+      - ./certbot/conf:/etc/letsencrypt:rw
+      - ./certbot/www:/var/www/certbot:rw
+    entrypoint: "/bin/sh -c \"trap exit TERM; while :; do certbot renew; sleep 12h & wait $!; done;\""
+
+volumes:
+  db_data:
+
+
